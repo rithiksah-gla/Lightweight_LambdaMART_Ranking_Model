@@ -1,72 +1,105 @@
 import pandas as pd
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from nltk.stem import PorterStemmer
+from nltk.tokenize import word_tokenize
 import lightgbm as lgb
-from sklearn.preprocessing import LabelEncoder
+import nltk
+import re
 
-# Load training and validation datasets
-train_df = pd.read_csv("train_dataset_lambdamart.csv")
-val_df = pd.read_csv("validation_dataset_lambdamart.csv")
+# Download tokenizer model (only first time)
+#nltk.download('punkt')
 
-# Encode labels (positive -> 1, negative -> 0) if not already binary
-label_encoder = LabelEncoder()
-train_df['query_label'] = label_encoder.fit_transform(train_df['query_label'])
-train_df['candidate_label'] = label_encoder.transform(train_df['candidate_label'])
-val_df['query_label'] = label_encoder.transform(val_df['query_label'])
-val_df['candidate_label'] = label_encoder.transform(val_df['candidate_label'])
+# Load your dataset
+df = pd.read_csv("train_dataset_lambdamart.csv")  # Ensure columns: query, candidate, score
 
-# Assign group ID (qid) to each query based on 'query' field
-def assign_group_ids(df):
-    df = df.copy()
-    df['qid'] = None
-    current_qid = 0
-    prev_query = None
-    for idx, row in df.iterrows():
-        if row['query'] != prev_query:
-            current_qid += 1
-            prev_query = row['query']
-        df.at[idx, 'qid'] = current_qid
-    return df
+# Initialize stemmer
+stemmer = PorterStemmer()
 
-train_df = assign_group_ids(train_df)
-val_df = assign_group_ids(val_df)
+def tokenize(text):
+    # Tokenize, lowercase, stem, and remove punctuation tokens
+    tokens = re.findall(r'\b\w+\b', text.lower())
+    return [stemmer.stem(token) for token in tokens]
 
-# Extract features — you can add more later
-def extract_features(df):
-    return df[['distance', 'score']]
+# Step 1: Compute IDF from combined stemmed query + doc corpus
+all_texts = df["query"].tolist() + df["candidate"].tolist()
+all_texts_stemmed = [" ".join(tokenize(text)) for text in all_texts]
 
-X_train = extract_features(train_df)
-y_train = (train_df['query_label'] == train_df['candidate_label']).astype(int)
-group_train = train_df.groupby('qid').size().to_numpy()
+vectorizer = TfidfVectorizer()
+vectorizer.fit(all_texts_stemmed)
+idf_dict = dict(zip(vectorizer.get_feature_names_out(), vectorizer.idf_))
 
-X_val = extract_features(val_df)
-y_val = (val_df['query_label'] == val_df['candidate_label']).astype(int)
-group_val = val_df.groupby('qid').size().to_numpy()
+# Step 2: Extract handcrafted features
+def extract_features(query, doc, idf_dict):
+    q_tokens = tokenize(query)
+    d_tokens = tokenize(doc)
 
-# LightGBM Datasets
-train_set = lgb.Dataset(X_train, label=y_train, group=group_train)
-val_set = lgb.Dataset(X_val, label=y_val, group=group_val, reference=train_set)
+    num_q_terms = len(q_tokens)
+    num_q_unique = len(set(q_tokens))
+    num_d_terms = len(d_tokens)
+    num_d_unique = len(set(d_tokens))
 
-# LambdaMART parameters
+    q_idfs = [idf_dict.get(t, 0) for t in q_tokens]
+    d_idfs = [idf_dict.get(t, 0) for t in d_tokens]
+
+    min_q_idf = min(q_idfs) if q_idfs else 0
+    max_q_idf = max(q_idfs) if q_idfs else 0
+    sum_q_idf = sum(q_idfs)
+
+    min_d_idf = min(d_idfs) if d_idfs else 0
+    max_d_idf = max(d_idfs) if d_idfs else 0
+    sum_d_idf = sum(d_idfs)
+
+    overlap = len(set(q_tokens) & set(d_tokens))
+    bm25_score = sum([idf_dict.get(t, 0) for t in set(q_tokens) & set(d_tokens)])
+
+    return [
+        num_q_terms, num_q_unique, num_d_terms, num_d_unique,
+        min_q_idf, max_q_idf, sum_q_idf,
+        min_d_idf, max_d_idf, sum_d_idf,
+        overlap, bm25_score
+    ]
+
+# Define feature names
+feature_names = [
+    'num_q_terms', 'num_q_unique', 'num_d_terms', 'num_d_unique',
+    'min_q_idf', 'max_q_idf', 'sum_q_idf',
+    'min_d_idf', 'max_d_idf', 'sum_d_idf',
+    'overlap', 'bm25_score'
+]
+
+# Extract features
+features = df.apply(lambda row: extract_features(row['query'], row['candidate'], idf_dict), axis=1, result_type='expand')
+features.columns = feature_names
+df = pd.concat([df, features], axis=1)
+
+# Step 3: Assign relevance scores (higher model score = more relevant)
+df = df.sort_values(by=['query', 'score'], ascending=[True, False])
+df['relevance'] = df.groupby('query').cumcount(ascending=False)
+
+# Step 4: Prepare data for LightGBM LambdaMART
+X = df[feature_names]
+y = df['relevance']
+group = df.groupby('query').size().to_list()
+
+train_data = lgb.Dataset(X, label=y, group=group)
+
+# Step 5: Train the LambdaMART model
 params = {
     'objective': 'lambdarank',
     'metric': 'ndcg',
-    'boosting': 'gbdt',
-    'ndcg_eval_at': [5, 10],
+    'ndcg_eval_at': [1, 3, 5],
     'learning_rate': 0.05,
     'num_leaves': 31,
-    'min_data_in_leaf': 20,
-    'verbose': -1
+    'verbosity': -1
 }
 
-# Train model
-print("Training LambdaMART model...")
-model = lgb.train(
-    params,
-    train_set,
-    valid_sets=[train_set, val_set],
-    valid_names=['train', 'valid'],
-    num_boost_round=1000
-)
+model = lgb.train(params, train_data, num_boost_round=100)
 
-# Save model
+# Save trained model
 model.save_model("lambdamart_model.txt")
-print("Model saved to lambdamart_model.txt")
+
+# Print feature importance
+# importance = model.feature_importance(importance_type='gain')
+# for name, score in zip(feature_names, importance):
+#     print(f"{name}: {score:.2f}")
