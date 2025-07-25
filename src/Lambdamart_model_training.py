@@ -7,9 +7,6 @@ import lightgbm as lgb
 import nltk
 import re
 
-# Download tokenizer model (only first time)
-#nltk.download('punkt')
-
 # Load your dataset
 df = pd.read_csv("train_dataset_lambdamart.csv")  # Ensure columns: query, candidate, score
 
