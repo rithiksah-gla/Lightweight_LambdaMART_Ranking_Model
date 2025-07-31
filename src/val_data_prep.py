@@ -2,19 +2,11 @@ import csv
 import torch
 from tqdm import tqdm
 from transformers import LlamaForCausalLM, LlamaTokenizer
-from torch.nn import functional as F
 from sentence_transformers import SentenceTransformer
 from sklearn.neighbors import KDTree
+from utils import load_sst2_data, score_candidate_llm
 
-# Load SST2 dev (validation) data
-def load_sst2_data(path):
-    examples = []
-    with open(path, encoding='utf-8') as f:
-        for line in f.readlines():
-            text, label = line.strip().split('\t')
-            examples.append({"text": text, "label": int(label)})
-    return examples
-
+# Load validation (dev) dataset
 val_data = load_sst2_data('dev.tsv')
 print(val_data[:5])
 print("Total validation examples:", len(val_data))
@@ -26,18 +18,20 @@ embeddings = sbert_model.encode(texts, show_progress_bar=True)
 tree = KDTree(embeddings)
 
 # Load LLaMA model and tokenizer
-
+hf_token = "hf***"
 model_name = 'meta-llama/llama-2-7b-hf'
 
 model = LlamaForCausalLM.from_pretrained(
     model_name,
     torch_dtype=torch.float16,
-    use_auth_token=hf_token
+    use_auth_token=hf_token,
+    cache_dir="/scratch/2980356s/hf_cache/"
 )
 tokenizer = LlamaTokenizer.from_pretrained(
     model_name,
     padding_side="left",
-    use_auth_token=hf_token
+    use_auth_token=hf_token,
+    cache_dir="/scratch/2980356s/hf_cache/"
 )
 tokenizer.add_special_tokens({'pad_token': '<PAD>'})
 model.resize_token_embeddings(len(tokenizer))
@@ -47,23 +41,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model.to(device)
 model.eval()
 
-# LLM scoring
-def score_candidate_llm(query_text, query_label, candidate_text, candidate_label, tokenizer, model, device, prompt_prefix):
-    demonstration = f"Review: {candidate_text}\nSentiment: {'positive' if candidate_label else 'negative'}\n"
-    prompt = f"{prompt_prefix}{demonstration}Review: {query_text}\nSentiment: "
-    inputs = tokenizer(prompt, return_tensors='pt').to(device)
-    with torch.no_grad():
-        logits = model(**inputs).logits
-    last_token_logits = logits[:, -1, :]
-    class_tokens = [
-        tokenizer.encode("negative", add_special_tokens=False)[0],
-        tokenizer.encode("positive", add_special_tokens=False)[0]
-    ]
-    probs = F.softmax(last_token_logits[:, class_tokens], dim=-1)
-    return probs[0, query_label].item()
-
 # Build validation triplets
-N = 10
+N = 50
 all_triplets = []
 
 for idx, query_ex in tqdm(enumerate(val_data), total=len(val_data)):
@@ -88,7 +67,7 @@ for idx, query_ex in tqdm(enumerate(val_data), total=len(val_data)):
             prompt_prefix='Your task is to judge whether the sentiment of a movie review is positive or negative.\n'
         )
 
-        all_triplets.append({
+	all_triplets.append({
             'query': query_text,
             'query_label': query_label,
             'candidate': candidate_text,
@@ -99,8 +78,8 @@ for idx, query_ex in tqdm(enumerate(val_data), total=len(val_data)):
 
 # Save as CSV and TSV
 fieldnames = ['query', 'query_label', 'candidate', 'candidate_label', 'distance', 'score']
-csv_file = "validation_dataset_lambdamart.csv"
-tsv_file = "validation_dataset_lambdamart.tsv"
+csv_file = "validation_dataset_lambdamart_N50.csv"
+tsv_file = "validation_dataset_lambdamart_N50.tsv"
 
 with open(csv_file, "w", encoding="utf-8", newline="") as f_csv:
     writer_csv = csv.DictWriter(f_csv, fieldnames=fieldnames)
