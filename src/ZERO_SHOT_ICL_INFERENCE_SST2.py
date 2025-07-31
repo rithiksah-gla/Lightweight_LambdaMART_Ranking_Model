@@ -6,7 +6,7 @@ import pandas as pd
 from sklearn.metrics import classification_report
 from tqdm import tqdm
 
-df = pd.read_csv("test_query_top20_candidates.csv")
+df = pd.read_csv("test_query_top50_candidates.csv")
 print("Total rows:", len(df))
 
 # Auth token and model setup
@@ -22,7 +22,7 @@ model = LlamaForCausalLM.from_pretrained(
     torch_dtype=torch.float16,
     device_map="auto"
 )
-model.resize_token_embeddings(len(tokenizer))
+#model.resize_token_embeddings(len(tokenizer))
 model.config.pad_token_id = tokenizer.pad_token_id
 model.eval()
 
