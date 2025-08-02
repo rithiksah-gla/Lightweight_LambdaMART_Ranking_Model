@@ -3,7 +3,7 @@ import numpy as np
 import lightgbm as lgb
 from lightgbm import early_stopping, log_evaluation
 import matplotlib.pyplot as plt
-#from utils import extract_features, extract_lda_features, get_idf_dict, build_lda_model
+from utils import extract_features, extract_lda_features, get_idf_dict, build_lda_model
 
 # Load data
 train_df = pd.read_csv("/kaggle/input/llm-utility-n50/train_dataset_lambdamart_N50.csv")
