@@ -9,6 +9,9 @@ from tqdm import tqdm
 df = pd.read_csv("test_query_top50_candidates.csv")
 print("Total rows:", len(df))
 
+# Compute reciprocal score from distance
+df["score"] = 1 / df["distance"]
+
 # Group by test query
 groups = df.groupby("query")
 
@@ -45,26 +48,31 @@ def predict_label(prompt):
     probs = F.softmax(last_token_logits[:, class_tokens], dim=-1)
     return torch.argmax(probs).item()
 
-# Run for both ascending and descending distance orders
+# Run for both ASC and DESC on same top-10
 for sort_order in ["asc", "desc"]:
     results = []
 
-    print(f"\nRunning k-shot inference with distance sorted: {sort_order.upper()}")
+    print(f"\nRunning k-shot inference using top-{K} candidates sorted {sort_order.upper()}")
 
     for query, group in tqdm(groups, total=len(groups)):
         query_label = group.iloc[0]['query_label']
 
-        if sort_order == "asc":
-            top_k_group = group.sort_values(by="distance", ascending=True).head(K)
-        else:
-            top_k_group = group.sort_values(by="distance", ascending=False).head(K)
+        # Step 1: pick top K candidates based on highest score (i.e., lowest distance)
+        top_k_group = group.sort_values(by="score", ascending=False).head(K)
 
+        # Step 2: reorder those top-K based on ASC or DESC score order
+        if sort_order == "asc":
+            top_k_group = top_k_group.sort_values(by="score", ascending=True)
+        else:
+            top_k_group = top_k_group.sort_values(by="score", ascending=False)
+
+        # Step 3: create prompt
         demonstrations = ""
         for _, cand in top_k_group.iterrows():
             sentiment = "positive" if cand['candidate_label'] == 1 else "negative"
             demonstrations += f"Review: {cand['candidate']}\nSentiment: {sentiment}\n"
 
-        test_prompt = f"{prompt_prefix}{demonstrations}Review: {query}\nSentiment: "
+        test_prompt = f"{prompt_prefix}{demonstrations}Review: {query}\nSentiment:"
         pred = predict_label(test_prompt)
 
         results.append({
@@ -75,7 +83,7 @@ for sort_order in ["asc", "desc"]:
         })
 
     result_df = pd.DataFrame(results)
-    result_df.to_csv(f"kshot_predictions_sorted_{sort_order}.csv", index=False)
+    result_df.to_csv(f"kshot_predictions_1overdist_sorted_{sort_order}.csv", index=False)
 
     # Evaluation
     y_true = result_df["query_label"].tolist()
@@ -88,5 +96,5 @@ for sort_order in ["asc", "desc"]:
         digits=4
     )
 
-    print(f"\nEvaluation Report - Distance Sorted {sort_order.upper()}:\n")
+    print(f"\nEvaluation Report - K-Shot (1/distance) Sorted {sort_order.upper()}:\n")
     print(report)
