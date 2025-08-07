@@ -59,4 +59,4 @@ for i, test_row in tqdm(test_df.iterrows(), total=len(test_df)):
 # Save to CSV
 output_df = pd.DataFrame(results)
 output_df.to_csv("test_query_top50_candidates.csv", index=False)
-print("Saved: test_query_top50_candidates.csv")
+print("Saved: test_query_top50_12_features_candidates.csv")
