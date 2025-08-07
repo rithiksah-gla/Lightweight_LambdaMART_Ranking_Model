@@ -6,8 +6,8 @@ from tqdm import tqdm
 from utils import extract_features, get_idf_dict
 
 # Load datasets
-train_df = pd.read_csv("train.tsv", sep="\t", names=["candidate", "candidate_label"])
-test_df = pd.read_csv("test.tsv", sep="\t", names=["query", "query_label"])
+train_df = pd.read_csv("/kaggle/input/top-50-dataset/train.tsv", sep="\t", names=["candidate", "candidate_label"])
+test_df = pd.read_csv("/kaggle/input/top-50-dataset/test.tsv", sep="\t", names=["query", "query_label"])
 
 # SBERT Embeddings
 print("Generating SBERT embeddings...")
@@ -58,5 +58,5 @@ for i, test_row in tqdm(test_df.iterrows(), total=len(test_df)):
 
 # Save to CSV
 output_df = pd.DataFrame(results)
-output_df.to_csv("test_query_top50_candidates.csv", index=False)
+output_df.to_csv("test_query_top50_12_features.csv", index=False)
 print("Saved: test_query_top50_12_features_candidates.csv")
