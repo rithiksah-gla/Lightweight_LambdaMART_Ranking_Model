@@ -1,3 +1,5 @@
+#validation Dataset prep N=50
+
 import csv
 import torch
 from tqdm import tqdm
@@ -11,11 +13,15 @@ val_data = load_sst2_data('dev.tsv')
 print(val_data[:5])
 print("Total validation examples:", len(val_data))
 
-# Create SBERT Embeddings and KDTree
+# Load train dataset for KDTree
+train_data = load_sst2_data('train.tsv')
+train_texts = [ex['text'] for ex in train_data]
+
+# Create SBERT Embeddings for train data and build KDTree
 sbert_model = SentenceTransformer('all-MiniLM-L6-v2')
-texts = [ex['text'] for ex in val_data]
-embeddings = sbert_model.encode(texts, show_progress_bar=True)
-tree = KDTree(embeddings)
+train_embeddings = sbert_model.encode(train_texts, show_progress_bar=True)
+tree = KDTree(train_embeddings)
+print("KDTree built on train data with size:", len(train_embeddings))
 
 # Load LLaMA model and tokenizer
 hf_token = "hf***"
@@ -49,16 +55,13 @@ for idx, query_ex in tqdm(enumerate(val_data), total=len(val_data)):
     query_text = query_ex['text']
     query_label = query_ex['label']
     query_embedding = sbert_model.encode([query_text])
-    dists, indices = tree.query(query_embedding, k=N+1)
-    indices = indices[0]
+    dists, indices = tree.query(query_embedding, k=N)
 
-    candidate_indices = [i for i in indices if i != idx][:N]
-
-    for i, cand_idx in enumerate(candidate_indices):
-        cand_ex = val_data[cand_idx]
+    for i, cand_idx in enumerate(indices[0]):
+        cand_ex = train_data[cand_idx]
         candidate_text = cand_ex['text']
         candidate_label = cand_ex['label']
-        distance = float(dists[0][i + 1])
+        distance = float(dists[0][i])
 
         prob = score_candidate_llm(
             query_text, query_label,
@@ -67,7 +70,7 @@ for idx, query_ex in tqdm(enumerate(val_data), total=len(val_data)):
             prompt_prefix='Your task is to judge whether the sentiment of a movie review is positive or negative.\n'
         )
 
-	all_triplets.append({
+        all_triplets.append({
             'query': query_text,
             'query_label': query_label,
             'candidate': candidate_text,
@@ -78,8 +81,8 @@ for idx, query_ex in tqdm(enumerate(val_data), total=len(val_data)):
 
 # Save as CSV and TSV
 fieldnames = ['query', 'query_label', 'candidate', 'candidate_label', 'distance', 'score']
-csv_file = "validation_dataset_lambdamart_N50.csv"
-tsv_file = "validation_dataset_lambdamart_N50.tsv"
+csv_file = "validation_dataset_lambdamart_v01_N50.csv"
+tsv_file = "validation_dataset_lambdamart_v01_N50.tsv"
 
 with open(csv_file, "w", encoding="utf-8", newline="") as f_csv:
     writer_csv = csv.DictWriter(f_csv, fieldnames=fieldnames)
