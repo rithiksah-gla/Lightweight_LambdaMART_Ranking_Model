@@ -6,20 +6,21 @@ from sentence_transformers import SentenceTransformer
 from sklearn.neighbors import KDTree
 from utils import load_sst2_data, score_candidate_llm
 
-# Load test dataset
-test_data = load_sst2_data('test.tsv')
-print(test_data[:5])
+# Load datasets
+test_data = load_sst2_data('test.tsv')       # queries
+train_data = load_sst2_data('train.tsv')     # candidate
 print("Total test examples:", len(test_data))
+print("Total train examples:", len(train_data))
 
-# Create SBERT Embeddings and KDTree
+# Create SBERT Embeddings for train set and build KDTree
 sbert_model = SentenceTransformer('all-MiniLM-L6-v2')
-texts = [ex['text'] for ex in test_data]
-embeddings = sbert_model.encode(texts, show_progress_bar=True)
-tree = KDTree(embeddings)
-print("Number of embeddings:", len(embeddings))
+train_texts = [ex['text'] for ex in train_data]
+train_embeddings = sbert_model.encode(train_texts, show_progress_bar=True)
+tree = KDTree(train_embeddings)
+print("KDTree built on", len(train_embeddings), "train examples")
 
 # Load LLaMA model and tokenizer
-hf_token = "hf****"
+hf_token = "hf***"
 model_name = 'meta-llama/llama-2-7b-hf'
 
 model = LlamaForCausalLM.from_pretrained(
@@ -50,16 +51,16 @@ for idx, query_ex in tqdm(enumerate(test_data), total=len(test_data)):
     query_text = query_ex['text']
     query_label = query_ex['label']
     query_embedding = sbert_model.encode([query_text])
-    dists, indices = tree.query(query_embedding, k=N+1)
+
+    # Search in train set
+    dists, indices = tree.query(query_embedding, k=N)
     indices = indices[0]
 
-    candidate_indices = [i for i in indices if i != idx][:N]
-
-    for i, cand_idx in enumerate(candidate_indices):
-        cand_ex = test_data[cand_idx]
+    for i, cand_idx in enumerate(indices):
+        cand_ex = train_data[cand_idx]
         candidate_text = cand_ex['text']
         candidate_label = cand_ex['label']
-        distance = float(dists[0][i + 1])
+        distance = float(dists[0][i])
 
         prob = score_candidate_llm(
             query_text, query_label,
@@ -68,7 +69,7 @@ for idx, query_ex in tqdm(enumerate(test_data), total=len(test_data)):
             prompt_prefix='Your task is to judge whether the sentiment of a movie review is positive or negative.\n'
         )
 
-	all_triplets.append({
+        all_triplets.append({
             'query': query_text,
             'query_label': query_label,
             'candidate': candidate_text,
@@ -79,8 +80,8 @@ for idx, query_ex in tqdm(enumerate(test_data), total=len(test_data)):
 
 # Save as CSV and TSV
 fieldnames = ['query', 'query_label', 'candidate', 'candidate_label', 'distance', 'score']
-csv_file = "test_dataset_lambdamart_N50.csv"
-tsv_file = "test_dataset_lambdamart_N50.tsv"
+csv_file = "test_dataset_lambdamart_v01_N50.csv"
+tsv_file = "test_dataset_lambdamart_v01_N50.tsv"
 
 with open(csv_file, "w", encoding="utf-8", newline="") as f_csv:
     writer_csv = csv.DictWriter(f_csv, fieldnames=fieldnames)
@@ -93,3 +94,4 @@ with open(tsv_file, "w", encoding="utf-8", newline="") as f_tsv:
     writer_tsv.writeheader()
     writer_tsv.writerows(all_triplets)
 print(f"Saved: {tsv_file}")
+
