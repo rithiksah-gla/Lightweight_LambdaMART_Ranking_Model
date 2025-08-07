@@ -1,3 +1,5 @@
+# ICL letor Inference using separate training for asc and desc. removing extra space from the prompt. and fixing asc and desc issue.
+
 import torch
 import pandas as pd
 import numpy as np
@@ -6,13 +8,10 @@ from transformers import LlamaForCausalLM, LlamaTokenizer
 from torch.nn import functional as F
 from tqdm import tqdm
 from sklearn.metrics import classification_report
-from utils import extract_features, tokenize, get_idf_dict
+#from utils import extract_features, tokenize, get_idf_dict
 
 # Load top-50 retrieved candidates from SBERT
 df = pd.read_csv("test_query_top50_candidates.csv")
-
-# Load trained LambdaMART model
-model = lgb.Booster(model_file="lambdamart_model.txt")
 
 # Extract IDF from all candidate/query texts for feature computation
 idf_dict = get_idf_dict(df["query"].tolist() + df["candidate"].tolist())
@@ -55,8 +54,11 @@ def predict_label_llm(prompt):
     probs = F.softmax(last_token_logits[:, class_tokens], dim=-1)
     return int(torch.argmax(probs).item())
 
-# Inference runner
+# Inference runner for ASC or DESC
 def run_kshot_letor_inference(order="desc"):
+    model_file = "lambdamart_model_12_features_asc.txt" if order == "asc" else "lambdamart_model_12_features_desc.txt"
+    model = lgb.Booster(model_file=model_file)
+
     y_true, y_pred, queries = [], [], []
 
     grouped = df.groupby("test_query_id")
@@ -71,18 +73,21 @@ def run_kshot_letor_inference(order="desc"):
         group = group.copy()
         group["lgbm_score"] = scores
 
-        # Sort by LambdaMART score
-        if order == "desc":
-            top_examples = group.sort_values("lgbm_score", ascending=False).head(top_k)
+        # Get top 10 by DESCENDING score (same for both orders)
+        top_10 = group.sort_values("lgbm_score", ascending=False).head(top_k)
+
+        # Order top 10 examples based on prompt order
+        if order == "asc":
+            top_examples = top_10.sort_values("lgbm_score", ascending=True)
         else:
-            top_examples = group.sort_values("lgbm_score", ascending=True).head(top_k)
+            top_examples = top_10  # already in desc order
 
         # Construct prompt
         prompt = prompt_prefix
         for _, row in top_examples.iterrows():
             sentiment = "positive" if row["candidate_label"] == 1 else "negative"
             prompt += f"Review: {row['candidate']}\nSentiment: {sentiment}\n"
-        prompt += f"Review: {query}\nSentiment: "
+        prompt += f"Review: {query}\nSentiment:"
 
         pred_label = predict_label_llm(prompt)
 
@@ -100,5 +105,6 @@ def run_kshot_letor_inference(order="desc"):
     print(f"\nK-shot LeToR ICL Evaluation ({order.upper()}):")
     print(classification_report(y_true, y_pred, target_names=["negative", "positive"], digits=4))
 
+# Run both
 run_kshot_letor_inference(order="asc")
 run_kshot_letor_inference(order="desc")
