@@ -26,7 +26,7 @@ print("Number of embeddings:", len(embeddings))
 print("Example embedding:", embeddings[0])
 
 # Load LLaMA model and tokenizer
-hf_token = "hf****"
+hf_token = "hf***"
 model_name = 'meta-llama/llama-2-7b-hf'
 single_precision = True
 
@@ -80,7 +80,7 @@ for idx, query_ex in tqdm(enumerate(train_data), total=len(train_data)):
             prompt_prefix='Your task is to judge whether the sentiment of a movie review is positive or negative.\n'
         )
 
-	all_triplets.append({
+        all_triplets.append({
             'query': query_text,
             'query_label': query_label,
             'candidate': candidate_text,
@@ -88,10 +88,11 @@ for idx, query_ex in tqdm(enumerate(train_data), total=len(train_data)):
             'distance': distance,
             'score': prob
         })
+
 # Save with unique filenames for N=50
 fieldnames = ['query', 'query_label', 'candidate', 'candidate_label', 'distance', 'score']
-csv_file = "train_dataset_lambdamart_N50.csv"
-tsv_file = "train_dataset_lambdamart_N50.tsv"
+csv_file = "train_dataset_lambdamart_v01_N50.csv"
+tsv_file = "train_dataset_lambdamart_v01_N50.tsv"
 
 with open(csv_file, "w", encoding="utf-8", newline="") as f_csv:
     writer_csv = csv.DictWriter(f_csv, fieldnames=fieldnames)
