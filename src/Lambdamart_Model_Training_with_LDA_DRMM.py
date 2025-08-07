@@ -1,4 +1,4 @@
-# with drmm
+# Latest model training with 48 features
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
@@ -15,6 +15,14 @@ from utils import (
 train_df_full = pd.read_csv("/kaggle/input/new-utilities/train_dataset_lambdamart_v01_N50.csv")
 val_df_full = pd.read_csv("/kaggle/input/new-utilities/validation_dataset_lambdamart_v01_N50.csv")
 
+# Load corpus for IDF and LDA from train.tsv
+train_raw = pd.read_csv("/kaggle/input/top-50-dataset/train.tsv", sep="\t", names=["candidate", "candidate_label"])
+corpus = train_raw["candidate"].tolist()
+
+# Build IDF and LDA from full training corpus
+idf_dict = get_idf_dict(corpus)
+lda_model, lda_dict = build_lda_model(corpus)
+
 # Select Top-10 by score
 def get_top10_by_score(df):
     return df.sort_values(by=["query", "score"], ascending=[True, False]) \
@@ -22,11 +30,6 @@ def get_top10_by_score(df):
 
 train_top10 = get_top10_by_score(train_df_full)
 val_top10 = get_top10_by_score(val_df_full)
-
-# Build IDF and LDA ONLY on top-10 text data
-all_texts = train_top10["query"].tolist() + train_top10["candidate"].tolist()
-idf_dict = get_idf_dict(all_texts)
-lda_model, lda_dict = build_lda_model(all_texts)
 
 # Feature names
 handcrafted_features = [
@@ -55,7 +58,7 @@ def extract_all_features(row):
     drmm_feats = extract_drmm_features(row['query'], row['candidate'], lda_model, lda_dict)
     return handcrafted + lda_feats + drmm_feats
 
-# Extract features for training and validation
+# Extract features
 print("Extracting features for TRAIN...")
 train_feats = train_top10.apply(extract_all_features, axis=1, result_type='expand')
 train_feats.columns = feature_names
