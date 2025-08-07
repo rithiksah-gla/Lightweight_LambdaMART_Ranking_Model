@@ -1,4 +1,4 @@
-# utils.py
+#latest utils.py
 import re
 import torch
 from torch.nn import functional as F
@@ -57,7 +57,7 @@ def get_idf_dict(text_list):
 def score_candidate_llm(query_text, query_label, candidate_text, candidate_label, tokenizer, model, device, prompt_prefix):
     # Build ICL prompt
     demonstration = f"Review: {candidate_text}\nSentiment: {'positive' if candidate_label else 'negative'}\n"
-    prompt = f"{prompt_prefix}{demonstration}Review: {query_text}\nSentiment: "
+    prompt = f"{prompt_prefix}{demonstration}Review: {query_text}\nSentiment:"
     
     #Tokenize
     inputs = tokenizer(prompt, return_tensors='pt').to(device)
@@ -194,3 +194,37 @@ def extract_lda_features(query, doc, lda_model, lda_dict, num_topics=50):
      al_sim,                         # 15
      theta_sim                       # 16
 ]
+
+def extract_drmm_features(query, doc, lda_model, lda_dict, num_topics=50, num_bins=20):
+    def get_phi_vectors(tokens):
+        bow = lda_dict.doc2bow(tokens)
+        phi_vecs = []
+        for word_id, _ in bow:
+            try:
+                vec = sparse2full(lda_model[[word_id]], num_topics)[0]
+                phi_vecs.append(vec)
+            except:
+                phi_vecs.append(np.zeros(num_topics))
+        return phi_vecs
+
+    q_tokens = tokenize(query)
+    d_tokens = tokenize(doc)
+    q_phi = get_phi_vectors(q_tokens)
+    d_phi = get_phi_vectors(d_tokens)
+
+    if not q_phi or not d_phi:
+        return [0] * num_bins
+
+    sim_matrix = np.zeros((len(q_phi), len(d_phi)))
+    for i, qv in enumerate(q_phi):
+        for j, dv in enumerate(d_phi):
+            if norm(qv) > 0 and norm(dv) > 0:
+                sim_matrix[i, j] = np.dot(qv, dv) / (norm(qv) * norm(dv))
+
+    histograms = []
+    for row in sim_matrix:
+        hist, _ = np.histogram(row, bins=num_bins, range=(-1, 1), density=True)
+        histograms.append(hist)
+
+    avg_histogram = np.mean(histograms, axis=0)
+    return avg_histogram.tolist()
