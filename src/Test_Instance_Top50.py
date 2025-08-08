@@ -3,7 +3,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.neighbors import KDTree
 from tqdm import tqdm
-from utils import extract_features, get_idf_dict
+#from utils import extract_features, get_idf_dict
 
 # Load datasets
 train_df = pd.read_csv("/kaggle/input/top-50-dataset/train.tsv", sep="\t", names=["candidate", "candidate_label"])
