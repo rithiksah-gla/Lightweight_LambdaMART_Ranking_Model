@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import lightgbm as lgb
 from lightgbm import early_stopping, log_evaluation
-from utils import extract_features, extract_lda_features, get_idf_dict, build_lda_model
+#from utils import extract_features, extract_lda_features, get_idf_dict, build_lda_model
 
 # Load raw SST2 train.tsv corpus for IDF + LDA
 train_corpus = pd.read_csv("/kaggle/input/top-50-dataset/train.tsv", sep="\t", names=["candidate", "candidate_label"])
