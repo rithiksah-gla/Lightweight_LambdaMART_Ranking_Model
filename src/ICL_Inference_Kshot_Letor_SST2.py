@@ -1,3 +1,4 @@
+#ICL k shot letor- 12 features
 import torch
 import pandas as pd
 import numpy as np
@@ -6,13 +7,14 @@ from transformers import LlamaForCausalLM, LlamaTokenizer
 from torch.nn import functional as F
 from tqdm import tqdm
 from sklearn.metrics import classification_report
-from utils import extract_features, get_idf_dict
+#from utils import extract_features, get_idf_dict
 
 # Load test top-50 SBERT candidates
 df = pd.read_csv("/kaggle/working/test_query_top50_12_features.csv")
 
-# Extract IDF from all candidate/query texts for feature computation
-idf_dict = get_idf_dict(df["query"].tolist() + df["candidate"].tolist())
+# Build IDF dictionary using SST2 train.tsv
+train_raw = pd.read_csv("/kaggle/input/top-50-dataset/train.tsv", sep="\t", names=["candidate", "candidate_label"])
+idf_dict = get_idf_dict(train_raw["candidate"].tolist())
 
 # Load LLaMA model and tokenizer
 hf_token = "hf***"
