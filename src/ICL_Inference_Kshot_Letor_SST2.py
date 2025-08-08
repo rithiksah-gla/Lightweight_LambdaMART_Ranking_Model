@@ -7,7 +7,7 @@ from transformers import LlamaForCausalLM, LlamaTokenizer
 from torch.nn import functional as F
 from tqdm import tqdm
 from sklearn.metrics import classification_report
-#from utils import extract_features, get_idf_dict
+from utils import extract_features, get_idf_dict
 
 # Load test top-50 SBERT candidates
 df = pd.read_csv("/kaggle/working/test_query_top50_12_features.csv")
