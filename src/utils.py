@@ -10,6 +10,8 @@ import numpy as np
 from gensim.matutils import sparse2full
 from itertools import product
 from numpy.linalg import norm
+from gensim.models import Word2Vec
+
 
 # Tokenizer and Stemmer
 stemmer = PorterStemmer()
@@ -228,3 +230,139 @@ def extract_drmm_features(query, doc, lda_model, lda_dict, num_topics=50, num_bi
 
     avg_histogram = np.mean(histograms, axis=0)
     return avg_histogram.tolist()
+
+
+def build_w2v_model(texts, vector_size=300, window=5, min_count=2, sg=1, workers=4):
+    """
+    Train a Word2Vec model on raw texts using the same tokenize() you already use.
+    Returns the trained model.
+    """
+    tokenized = [tokenize(t) for t in texts]
+    model = Word2Vec(
+        sentences=tokenized,
+        vector_size=vector_size,
+        window=window,
+        min_count=min_count,
+        sg=sg,             # 1=skipgram, 0=CBOW
+        workers=workers,
+        epochs=5
+    )
+    return model
+
+def extract_drmm_w2v_features(query, doc, w2v_model, num_bins=20):
+    """
+    DRMM-style 20-dim histogram features using Word2Vec token vectors.
+    - cosine similarities between each query-token vector and all doc-token vectors
+    - per query token: histogram over [-1, 1], density=True
+    - average histograms across query tokens
+    """
+    q_tokens = tokenize(query)
+    d_tokens = tokenize(doc)
+
+    # collect vectors only for tokens present in vocab
+    q_vecs = []
+    for t in q_tokens:
+        if t in w2v_model.wv:
+            v = w2v_model.wv[t]
+            n = np.linalg.norm(v)
+            if n > 0: q_vecs.append(v / n)
+
+    d_vecs = []
+    for t in d_tokens:
+        if t in w2v_model.wv:
+            v = w2v_model.wv[t]
+            n = np.linalg.norm(v)
+            if n > 0: d_vecs.append(v / n)
+
+    if not q_vecs or not d_vecs:
+        return [0.0] * num_bins
+
+    q_mat = np.stack(q_vecs)          # [Q, D]
+    d_mat = np.stack(d_vecs)
+
+    # cosine matrix = dot of normalized vectors
+    sim = q_mat @ d_mat.T             # shape [len(q_vecs), len(d_vecs)]
+
+    # per-query-token histogram, then average
+    hists = []
+    for i in range(sim.shape[0]):
+        hist, _ = np.histogram(sim[i], bins=num_bins, range=(-1.0, 1.0), density=True)
+        hists.append(hist)
+    avg_hist = np.mean(hists, axis=0)
+    return avg_hist.tolist()
+
+def extract_phi_w2v_features(query, doc, w2v_model):
+    """
+    All vectors L2-normalized before similarity; cosine reduces to dot.
+    """
+    def get_normed_vecs(tokens):
+        vecs = []
+        for t in tokens:
+            if t in w2v_model.wv:
+                v = w2v_model.wv[t]
+                n = norm(v)
+                if n > 0:
+                    vecs.append(v / n)
+        return vecs
+
+    def avg_vec(vecs, dim):
+        return np.mean(vecs, axis=0) if vecs else np.zeros(dim, dtype=np.float32)
+
+    def norm_stats(vecs):
+        if not vecs:
+            return 0.0, 0.0
+        ns = [float(norm(v)) for v in vecs]   # with normalized inputs these are ~1.0
+        return (min(ns), max(ns)) if ns else (0.0, 0.0)
+
+    def pairwise_sim_stats(vecs):
+        if len(vecs) < 2:
+            return 0.0, 0.0, 0.0
+        sims = [float(np.dot(a, b))
+                for i, a in enumerate(vecs)
+                for j, b in enumerate(vecs) if i < j]
+        return (min(sims), max(sims), float(np.mean(sims))) if sims else (0.0, 0.0, 0.0)
+
+    def cross_link_stats(q_vecs, d_vecs):
+        if not q_vecs or not d_vecs:
+            return 0.0, 0.0, 0.0
+        sims = [float(np.dot(q, d)) for q in q_vecs for d in d_vecs]
+        return (min(sims), max(sims), float(np.mean(sims))) if sims else (0.0, 0.0, 0.0)
+
+    # tokenize + collect vectors
+    q_tokens = tokenize(query)
+    d_tokens = tokenize(doc)
+    q_vecs = get_normed_vecs(q_tokens)
+    d_vecs = get_normed_vecs(d_tokens)
+
+    dim = w2v_model.vector_size
+
+    # query stats
+    q_avg = avg_vec(q_vecs, dim)
+    q_min_norm, q_max_norm = norm_stats(q_vecs)
+    q_min_sim, q_max_sim, q_avg_sim = pairwise_sim_stats(q_vecs)
+
+    # doc stats
+    d_avg = avg_vec(d_vecs, dim)
+    d_min_norm, d_max_norm = norm_stats(d_vecs)
+    d_min_sim, d_max_sim, d_avg_sim = pairwise_sim_stats(d_vecs)
+
+    # cross-link stats
+    sl_sim, cl_sim, al_sim = cross_link_stats(q_vecs, d_vecs)
+
+    return [
+        float(norm(q_avg)),  # 1: ||avg q||
+        q_min_norm,          # 2
+        q_max_norm,          # 3
+        q_min_sim,           # 4
+        q_max_sim,           # 5
+        q_avg_sim,           # 6
+        float(norm(d_avg)),  # 7: ||avg d||
+        d_min_norm,          # 8
+        d_max_norm,          # 9
+        d_min_sim,           #10
+        d_max_sim,           #11
+        d_avg_sim,           #12
+        sl_sim,              #13 single-link (min cross)
+        cl_sim,              #14 complete-link (max cross)
+        al_sim               #15 average-link (mean cross)
+    ]
