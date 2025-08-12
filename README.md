@@ -14,14 +14,19 @@ We experiment with different feature sets (word, topics, interactions, phi) and 
 
 
 ## General Pipeline Steps:
-
+0. Run the **utils.py** file to define the repetitve methods.
 1. **Data Preparation**  
 Run these file for LLM utilities:
 - python Data_Prep_Train.py
 - python Data_Prep_Test.py
 - python Data_Prep_Val.py
 
-3. **Top-50 Retrieval + Feature Extraction**
+2. **Top-50 Retrieval + Feature Extraction**
 Choose the appropriate Test_Instance_Top50_*.py for your feature set.
-
+- Test_Instance_Top50_Word.py
+- Test_Instance_Top50_Word_DRMM(w2v).py
+- Test_Instance_Top50_Word_DRMM.py
+- Test_Instance_Top50_Word_DRMM_phi(w2v).py
+- Test_Instance_Top50_Word_LDA.py
+- Test_Instance_Top50_Word_LDA_DRMM.py
 4. 
