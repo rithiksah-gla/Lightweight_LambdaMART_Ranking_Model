@@ -17,11 +17,11 @@ We experiment with different feature sets (word, topics, interactions, phi) and 
 
 1. **Data Preparation**  
 Run these file for LLM utilities:
-   python Data_Prep_Train.py
-   python Data_Prep_Test.py
-   python Data_Prep_Val.py
+- python Data_Prep_Train.py
+- python Data_Prep_Test.py
+- python Data_Prep_Val.py
 
-2. **Top-50 Retrieval + Feature Extraction**
+3. **Top-50 Retrieval + Feature Extraction**
 Choose the appropriate Test_Instance_Top50_*.py for your feature set.
 
 4. 
