@@ -15,8 +15,11 @@ nltk.download('punkt')
 from gensim.models import Word2Vec
 import numpy as np
 from numpy.linalg import norm
+from gensim import corpora, models
+from gensim.matutils import sparse2full
+from itertools import product
 
-# Load LLM model and tokenizer globally
+# Load LLM model and tokenizer globally (assumes same setup as SST2)
 hf_token = "hf***"  # Replace with your actual token
 model_name = 'meta-llama/llama-2-7b-hf'
 single_precision = True
@@ -38,7 +41,7 @@ tokenizer.add_special_tokens({'pad_token': '<PAD>'})
 model.resize_token_embeddings(len(tokenizer))
 model.config.pad_token_id = tokenizer.pad_token_id
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 model.to(device)
 model.eval()
 
@@ -217,4 +220,130 @@ def extract_drmm_w2v_features(query, doc, w2v_model, num_bins=20):
         hists.append(hist)
     avg_hist = np.mean(hists, axis=0)
     return avg_hist.tolist()
+
+def build_lda_model(texts, num_topics=50):
+    """
+    Train an LDA model on tokenised texts using nq_utils.tokenize().
+    Returns (lda_model, dictionary).
+    """
+    tokenized_texts = [tokenize(t) for t in texts]
+    dictionary = corpora.Dictionary(tokenized_texts)
+    corpus = [dictionary.doc2bow(text) for text in tokenized_texts]
+    lda_model = models.LdaModel(corpus, num_topics=num_topics, id2word=dictionary, passes=10)
+    return lda_model, dictionary
+
+def extract_lda_features(query, doc, lda_model, lda_dict, num_topics=50):
+    """
+    16-D LDA topic features (same as SST2 utils):
+      1  ||avg query phi||
+      2  min ||q_phi||
+      3  max ||q_phi||
+      4  min sim(q_phi,q_phi)
+      5  max sim(q_phi,q_phi)
+      6  avg sim(q_phi,q_phi)
+      7  ||avg doc phi||
+      8  min ||d_phi||
+      9  max ||d_phi||
+      10 min sim(d_phi,d_phi)
+      11 max sim(d_phi,d_phi)
+      12 avg sim(d_phi,d_phi)
+      13 single-link cross (min sim)
+      14 complete-link cross (max sim)
+      15 average-link cross (mean sim)
+      16 theta cosine similarity (query vs doc)
+    """
+    def get_phi_vectors(tokens):
+        if not tokens:
+            return []
+        bow = lda_dict.doc2bow(tokens)
+        vecs = []
+        for token_id, count in bow:
+            single_token_bow = [(token_id, count)]
+            topic_dist = lda_model.get_document_topics(single_token_bow, minimum_probability=0)
+            vec = sparse2full(topic_dist, num_topics)
+            vecs.append(vec)
+        return vecs
+
+    def get_theta_vector(tokens):
+        bow = lda_dict.doc2bow(tokens)
+        return sparse2full(lda_model[bow], num_topics)
+
+    def avg_phi(vecs):
+        return np.mean(vecs, axis=0) if vecs else np.zeros(num_topics)
+
+    def norm_stats(vecs):
+        norms = [norm(v) for v in vecs if norm(v) > 0]
+        if not norms:
+            return 0.0, 0.0
+        return min(norms), max(norms)
+
+    def pairwise_sim_stats(vecs):
+        sims = [
+            np.dot(a, b) / (norm(a) * norm(b))
+            for i, a in enumerate(vecs)
+            for j, b in enumerate(vecs) if i < j and norm(a) > 0 and norm(b) > 0
+        ]
+        if not sims:
+            return 0.0, 0.0, 0.0
+        return min(sims), max(sims), float(np.mean(sims))
+
+    def cross_sim_stats(q_vecs, d_vecs):
+        sims = [
+            np.dot(q, d) / (norm(q) * norm(d))
+            for q in q_vecs for d in d_vecs
+            if norm(q) > 0 and norm(d) > 0
+        ]
+        if not sims:
+            return 0.0, 0.0, 0.0
+        return min(sims), max(sims), float(np.mean(sims))
+
+    def cosine_sim(a, b):
+        return np.dot(a, b) / (norm(a) * norm(b)) if norm(a) > 0 and norm(b) > 0 else 0.0
+
+    # Tokenise
+    q_tokens = tokenize(query)
+    d_tokens = tokenize(doc)
+
+    # Phi vectors
+    q_phi = get_phi_vectors(q_tokens)
+    d_phi = get_phi_vectors(d_tokens)
+
+    # Theta vectors
+    q_theta = get_theta_vector(q_tokens)
+    d_theta = get_theta_vector(d_tokens)
+
+    # Query stats
+    q_avg_phi = avg_phi(q_phi)
+    q_min_norm, q_max_norm = norm_stats(q_phi)
+    q_min_sim, q_max_sim, q_avg_sim = pairwise_sim_stats(q_phi)
+
+    # Document stats
+    d_avg_phi = avg_phi(d_phi)
+    d_min_norm, d_max_norm = norm_stats(d_phi)
+    d_min_sim, d_max_sim, d_avg_sim = pairwise_sim_stats(d_phi)
+
+    # Cross stats
+    sl_sim, cl_sim, al_sim = cross_sim_stats(q_phi, d_phi)
+
+    # Theta cosine similarity
+    theta_sim = cosine_sim(q_theta, d_theta)
+
+    return [
+        float(norm(q_avg_phi)),         # 1
+        q_min_norm,                     # 2
+        q_max_norm,                     # 3
+        q_min_sim,                      # 4
+        q_max_sim,                      # 5
+        q_avg_sim,                      # 6
+        float(norm(d_avg_phi)),         # 7
+        d_min_norm,                     # 8
+        d_max_norm,                     # 9
+        d_min_sim,                      # 10
+        d_max_sim,                      # 11
+        d_avg_sim,                      # 12
+        sl_sim,                         # 13
+        cl_sim,                         # 14
+        al_sim,                         # 15
+        theta_sim                       # 16
+    ]
 
