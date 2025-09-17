@@ -67,7 +67,6 @@ python Data_Prep_Val.py
 ## 3. NQ-Open (RAG) Pipeline
 
 We extend the same ranking framework to **NQ-Open**, a large-scale open-domain QA benchmark.
-👉 Repo: [src\_nq\_open](https://github.com/rithiksah-gla/Lightweight_LambdaMART_Ranking_Model/tree/main/src_nq_open)
 
 ### Steps:
 
